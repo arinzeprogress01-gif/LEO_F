@@ -1,0 +1,106 @@
+# LEO FRONTEND — TECHNICAL HANDOVER
+
+## 1. Project Environment
+
+- Project: LEO frontend
+- Working directory: `C:\Users\HomePC\Desktop\NEW_LEO\frontend`
+- Terminal: Windows CMD
+- Node.js: `v24.14.0`
+- npm: `11.9.0`
+- Architecture: Windows x64
+- Vite: `8.3.5`
+- Rolldown: `1.2.15`
+- Native binding: `@rolldown/binding-win32-x64-msvc@1.2.15`
+
+## 2. Problem Encountered
+
+Running `npm run dev` produced errors involving:
+
+- `tinyglobby` missing the `escapePath` export.
+- Rolldown failing to load its native binding.
+- `rolldown-binding.win32-x64-msvc.node is not a valid Win32 application`.
+- An attempted fallback error involving `@rolldown/binding-wasm32-wasi`.
+
+The investigation focused on the installed native binding, not on rewriting the React application.
+
+## 3. Diagnostic Commands Already Run
+
+```cmd
+npm config get optional
+npm config get omit
+npm config get package-lock
+```
+
+```cmd
+npm ls vite rolldown @rolldown/binding-win32-x64-msvc
+```
+
+```cmd
+dir node_modules\@rolldown\binding-win32-x64-msvc
+```
+
+We also tested whether Node could load the native binding directly.
+
+## 4. Repair Performed
+
+First, we removed only the affected package folder:
+
+```cmd
+rmdir /s /q node_modules\@rolldown\binding-win32-x64-msvc
+```
+
+Then we reinstalled the exact version identified in the dependency tree:
+
+```cmd
+npm install @rolldown/binding-win32-x64-msvc@1.2.15 --save-exact --no-audit --no-fund
+```
+
+After installation, we ran this verification command:
+
+```cmd
+node -e "try { require('./node_modules/@rolldown/binding-win32-x64-msvc'); console.log('Native binding loaded successfully'); } catch (e) { console.error(e); process.exitCode = 1; }"
+```
+
+**Result:**
+
+```text
+Native binding loaded successfully
+```
+
+This confirms that Node.js can now load the native binding successfully.
+
+## 5. Current Status
+
+- [x] Identified the relevant Vite/Rolldown dependency versions.
+- [x] Investigated the native binding loading error.
+- [x] Removed and reinstalled the affected binding package.
+- [x] Verified that Node.js can load the binding.
+- [x] Confirm that the complete Vite development server starts.
+- [x] Continue frontend development after the server is confirmed working.
+
+## 6. Immediate Next Action
+
+Open CMD and run:
+
+```cmd
+cd /d C:\Users\HomePC\Desktop\NEW_LEO\frontend
+npm run dev
+```
+
+If Vite starts, open the local URL printed in the terminal, usually:
+
+`http://localhost:5173/`
+
+If it fails, capture the complete new error and investigate that error before changing dependencies again.
+
+## 7. Important Working Rules
+
+1. Do not delete the whole project or reinstall every dependency without evidence.
+2. Do not repeatedly execute `npm install` while an earlier installation is still running.
+3. A successful native-binding test does not by itself prove that Vite starts; run `npm run dev` to verify.
+4. If the same error returns, inspect the current dependency tree and use the version required by that project.
+5. Keep troubleshooting step by step, using Windows CMD commands and explaining each change before executing it.
+
+## Instruction for the Next Chat
+
+Resume from the current state. The Rolldown native-binding test has passed. First verify `npm run dev`, then help me continue building the LEO frontend. Do not restart the troubleshooting process from scratch unless the new error gives us a reason to do so.
