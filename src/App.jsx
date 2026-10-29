@@ -24,6 +24,7 @@ function App() {
   const [translatedText, setTranslatedText] = useState('')
   const [theme, setTheme] = useState('light')
   const [activePage, setActivePage] = useState('translate')
+  const [sidebarOpen, setSidebarOpen] = useState(false)
   const [savedPhrases, setSavedPhrases] = useState([])
   const [notice, setNotice] = useState('')
   const [isCopying, setIsCopying] = useState(false)
@@ -181,16 +182,20 @@ async function handleTranslate() {
   }
 
   function openPage(page) {
-    setActivePage(page)
-    setNotice('')
-  }
+  setActivePage(page)
+  setNotice('')
+  setSidebarOpen(false)
+}
 
   return (
     <div className={`app-shell theme-${theme}`}>
-      <aside className="sidebar">
+      <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
         <button
           className="brand"
-          onClick={() => openPage('translate')}
+          oonClick={() => {
+  openPage('translate')
+  setSidebarOpen(false)
+}}
           aria-label="LEO home"
         >
           <span className="brand-mark" aria-hidden="true">
@@ -239,8 +244,25 @@ async function handleTranslate() {
         </div>
       </aside>
 
+      {sidebarOpen && (
+        <button
+          className="sidebar-backdrop"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="Close navigation menu"
+        />
+      )}
+
       <div className="main-column">
         <header className="topbar">
+          <button
+            className="mobile-menu-button"
+            onClick={() => setSidebarOpen((current) => !current)}
+            aria-label={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
+            aria-expanded={sidebarOpen}
+          >
+            {sidebarOpen ? '✕' : '☰'}
+          </button>
+
           <div className="breadcrumb">
             <span>Workspace</span>
             <span className="breadcrumb-separator">/</span>
