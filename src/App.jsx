@@ -1,6 +1,8 @@
-
 import { useState } from 'react'
 import './App.css'
+
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
 
 const languages = [
   { code: 'en', name: 'English', flag: '🇬🇧' },
@@ -25,6 +27,7 @@ function App() {
   const [savedPhrases, setSavedPhrases] = useState([])
   const [notice, setNotice] = useState('')
   const [isCopying, setIsCopying] = useState(false)
+  const [isTranslating, setIsTranslating] = useState(false)
 
   const source = languages.find(
     (language) => language.code === sourceLanguage,
@@ -43,17 +46,62 @@ function App() {
     setNotice('')
   }
 
-  function handleTranslate() {
-    if (!sourceText.trim()) {
-      showNotice('Enter a message before translating.')
-      return
+async function handleTranslate() {
+  if (!sourceText.trim()) {
+    showNotice('Enter a message before translating.')
+    return
+  }
+
+  if (isTranslating) return
+
+  setIsTranslating(true)
+  setTranslatedText('')
+  showNotice('Translating your message...')
+
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/translate`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: sourceText.trim(),
+          sourceLanguage,
+          targetLanguage,
+        }),
+      },
+    )
+
+    const data = await response.json()
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message || 'Translation failed. Please try again.',
+      )
     }
 
-    setTranslatedText('')
+    setTranslatedText(data.translation)
+
+    if (data.fallbackUsed) {
+      showNotice(
+        `Translation successful using backup model: ${data.model}.`,
+      )
+    } else {
+      showNotice('Translation completed successfully.')
+    }
+  } catch (error) {
+    console.error('LEO translation error:', error)
+
     showNotice(
-      'Translation service is not connected yet. Your text is ready for the API integration.',
+      error.message ||
+        'Unable to reach LEO. Check your internet connection and try again.',
     )
+  } finally {
+    setIsTranslating(false)
   }
+}
 
   function handleClear() {
     setSourceText('')
@@ -376,10 +424,16 @@ function App() {
                 </div>
 
                 <div className="translation-actions">
-                  <button className="primary-button" onClick={handleTranslate}>
+                  <button
+                    className="primary-button"
+                    onClick={handleTranslate}
+                    disabled={isTranslating}
+                  >
                     <span aria-hidden="true">✦</span>
-                    Translate message
-                    <span className="button-arrow" aria-hidden="true">→</span>
+                    {isTranslating ? 'Translating...' : 'Translate message'}
+                    {!isTranslating && (
+                      <span className="button-arrow" aria-hidden="true">→</span>
+                    )}
                   </button>
 
                   <button className="secondary-button" onClick={handleSavePhrase}>
