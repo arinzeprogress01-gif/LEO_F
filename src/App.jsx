@@ -1,8 +1,15 @@
 import { useState } from 'react'
 import './App.css'
 
+import {
+  getCachedTranslation,
+  saveCachedTranslation,
+} from './utils/translationCache'
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
+
+
 
 const languages = [
   { code: 'en', name: 'English', flag: '🇬🇧' },
@@ -48,7 +55,9 @@ function App() {
   }
 
 async function handleTranslate() {
-  if (!sourceText.trim()) {
+  const cleanText = sourceText.trim()
+
+  if (!cleanText) {
     showNotice('Enter a message before translating.')
     return
   }
@@ -57,9 +66,27 @@ async function handleTranslate() {
 
   setIsTranslating(true)
   setTranslatedText('')
-  showNotice('Translating your message...')
+  showNotice('Checking translation cache...')
 
   try {
+    // 1. Check browser cache first
+    const cachedData = await getCachedTranslation(
+      cleanText,
+      sourceLanguage,
+      targetLanguage,
+    )
+
+    if (cachedData) {
+      setTranslatedText(cachedData.translation)
+
+      showNotice('Translation retrieved instantly from your cache.')
+
+      return
+    }
+
+    // 2. Cache miss: request translation from backend
+    showNotice('Translating your message...')
+
     const response = await fetch(
       `${API_BASE_URL}/api/translate`,
       {
@@ -68,7 +95,7 @@ async function handleTranslate() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          text: sourceText.trim(),
+          text: cleanText,
           sourceLanguage,
           targetLanguage,
         }),
@@ -83,7 +110,20 @@ async function handleTranslate() {
       )
     }
 
+    // 3. Display translation
     setTranslatedText(data.translation)
+
+    // 4. Save successful translation in browser
+    await saveCachedTranslation(
+      cleanText,
+      sourceLanguage,
+      targetLanguage,
+      {
+        translation: data.translation,
+        model: data.model,
+        fallbackUsed: data.fallbackUsed,
+      },
+    )
 
     if (data.fallbackUsed) {
       showNotice(
@@ -92,6 +132,7 @@ async function handleTranslate() {
     } else {
       showNotice('Translation completed successfully.')
     }
+
   } catch (error) {
     console.error('LEO translation error:', error)
 
@@ -102,7 +143,7 @@ async function handleTranslate() {
   } finally {
     setIsTranslating(false)
   }
-}
+};
 
   function handleClear() {
     setSourceText('')
