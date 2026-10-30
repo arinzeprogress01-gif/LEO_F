@@ -315,7 +315,7 @@ async function handleTranslate() {
           <div className="topbar-actions">
             <span className="service-status">
               <span className="status-dot" />
-              Translation API not connected
+              SET YOUR MODE!
             </span>
 
             <button
