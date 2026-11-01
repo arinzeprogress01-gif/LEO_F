@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg'],
+      includeAssets: ['icons.svg'],
       manifest: {
         name: 'LEO — Language Companion',
         short_name: 'LEO',
