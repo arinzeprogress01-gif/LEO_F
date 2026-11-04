@@ -6,6 +6,14 @@ import {
   saveCachedTranslation,
 } from './utils/translationCache'
 
+import {
+  speakText,
+  pauseSpeech,
+  resumeSpeech,
+  stopSpeech,
+  isSpeechSupported,
+} from './services/audio/speech.services'
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
 
@@ -36,6 +44,8 @@ function App() {
   const [notice, setNotice] = useState('')
   const [isCopying, setIsCopying] = useState(false)
   const [isTranslating, setIsTranslating] = useState(false)
+  const [speechStatus, setSpeechStatus] = useState('idle')
+  const [speakingTarget, setSpeakingTarget] = useState('')
 
   const source = languages.find(
     (language) => language.code === sourceLanguage,
@@ -47,6 +57,54 @@ function App() {
   function showNotice(message) {
     setNotice(message)
   }
+
+  function handleListen(text, languageCode, target) {
+  if (!text?.trim()) {
+    showNotice('There is no text available to read.')
+    return
+  }
+
+  if (!isSpeechSupported()) {
+    showNotice('Your browser does not support speech playback.')
+    return
+  }
+
+  const result = speakText(text, languageCode, {
+    onStart: () => {
+      setSpeechStatus('speaking')
+      setSpeakingTarget(target)
+    },
+    onEnd: () => {
+      setSpeechStatus('idle')
+      setSpeakingTarget('')
+    },
+    onError: () => {
+      setSpeechStatus('idle')
+      setSpeakingTarget('')
+      showNotice('Speech playback encountered an error.')
+    },
+  })
+
+  if (!result.success) {
+    showNotice(result.message)
+  }
+}
+
+function handlePauseSpeech() {
+  pauseSpeech()
+  setSpeechStatus('paused')
+}
+
+function handleResumeSpeech() {
+  resumeSpeech()
+  setSpeechStatus('speaking')
+}
+
+function handleStopSpeech() {
+  stopSpeech()
+  setSpeechStatus('idle')
+  setSpeakingTarget('')
+}
 
   function handleSourceChange(value) {
     setSourceText(value)
@@ -233,7 +291,7 @@ async function handleTranslate() {
       <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
         <button
           className="brand"
-          oonClick={() => {
+          onClick={() => {
   openPage('translate')
   setSidebarOpen(false)
 }}
@@ -407,9 +465,24 @@ async function handleTranslate() {
                       <span className="character-count">
                         {sourceText.length.toLocaleString()} / 4,000
                       </span>
-                      <button className="sample-button" onClick={handleSample}>
-                        <span aria-hidden="true">✧</span> Try an example
-                      </button>
+
+                      <div className="footer-controls">
+                        <button
+                          className="copy-button"
+                          onClick={() =>
+                            handleListen(sourceText, sourceLanguage, 'source')
+                          }
+                          disabled={!sourceText.trim()}
+                        >
+                          {speakingTarget === 'source' && speechStatus === 'speaking'
+                            ? 'Playing...'
+                            : '▶ Listen'}
+                        </button>
+
+                        <button className="sample-button" onClick={handleSample}>
+                          <span aria-hidden="true">✧</span> Try an example
+                        </button>
+                      </div>
                     </div>
                   </article>
 
@@ -474,17 +547,60 @@ async function handleTranslate() {
 
                     <div className="card-footer output-footer">
                       <span>{target.name} output</span>
-                      <button
-                        className="copy-button"
-                        onClick={handleCopy}
-                        disabled={!translatedText}
-                      >
-                        <span aria-hidden="true">{isCopying ? '✓' : '▢'}</span>
-                        {isCopying ? 'Copied' : 'Copy'}
-                      </button>
+
+                      <div className="footer-controls">
+                        <button
+                          className="copy-button"
+                          onClick={() =>
+                            handleListen(translatedText, targetLanguage, 'translation')
+                          }
+                          disabled={!translatedText}
+                        >
+                          {speakingTarget === 'translation' &&
+                            speechStatus === 'speaking'
+                            ? 'Playing...'
+                            : '▶ Listen'}
+                        </button>
+
+                        <button
+                          className="copy-button"
+                          onClick={handleCopy}
+                          disabled={!translatedText}
+                        >
+                          <span aria-hidden="true">{isCopying ? '✓' : '▢'}</span>
+                          {isCopying ? 'Copied' : 'Copy'}
+                        </button>
+                      </div>
                     </div>
                   </article>
                 </div>
+
+                {speechStatus !== 'idle' && (
+                  <div className="translation-actions">
+                    {speechStatus === 'speaking' ? (
+                      <button
+                        className="secondary-button"
+                        onClick={handlePauseSpeech}
+                      >
+                        ⏸ Pause
+                      </button>
+                    ) : (
+                      <button
+                        className="secondary-button"
+                        onClick={handleResumeSpeech}
+                      >
+                        ▶ Resume
+                      </button>
+                    )}
+
+                    <button
+                      className="secondary-button"
+                      onClick={handleStopSpeech}
+                    >
+                      ■ Stop
+                    </button>
+                  </div>
+                )}
 
                 <div className="translation-actions">
                   <button
