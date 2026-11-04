@@ -373,7 +373,7 @@ async function handleTranslate() {
           <div className="topbar-actions">
             <span className="service-status">
               <span className="status-dot" />
-              SET YOUR MODE!
+              DAVID IS HERE
             </span>
 
             <button
