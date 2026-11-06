@@ -11,7 +11,6 @@ import {
   pauseSpeech,
   resumeSpeech,
   stopSpeech,
-  isSpeechSupported,
 } from './services/audio/speech.services'
 
 const API_BASE_URL =
@@ -69,53 +68,73 @@ function App() {
     setNotice(message)
   }
 
-  function handleListen(text, languageCode, target) {
-  if (!text?.trim()) {
-    showNotice('There is no text available to read.')
-    return
-  }
 
-  if (!isSpeechSupported()) {
-    showNotice('Your browser does not support speech playback.')
-    return
-  }
 
-  const result = speakText(text, languageCode, {
-    onStart: () => {
-      setSpeechStatus('speaking')
-      setSpeakingTarget(target)
-    },
-    onEnd: () => {
+  async function handleListen(text, languageCode, target) {
+    if (!text?.trim()) {
+      showNotice('There is no text available to read.')
+      return
+    }
+
+    if (languageCode === 'auto') {
+      showNotice('Select the source language before playing its audio.')
+      return
+    }
+
+    stopSpeech()
+    setSpeechStatus('loading')
+    setSpeakingTarget(target)
+
+    showNotice('Generating high-quality speech...')
+
+    try {
+      const result = await speakText(text, languageCode, {
+        onStart: () => {
+          setSpeechStatus('speaking')
+          setSpeakingTarget(target)
+          showNotice('')
+        },
+        onEnd: () => {
+          setSpeechStatus('idle')
+          setSpeakingTarget('')
+        },
+        onError: (error) => {
+          setSpeechStatus('idle')
+          setSpeakingTarget('')
+          showNotice(
+            error?.message || 'Speech playback encountered an error.'
+          )
+        },
+      })
+
+      if (!result.success) {
+        setSpeechStatus('idle')
+        setSpeakingTarget('')
+        showNotice(result.message || 'Speech generation failed.')
+      }
+    } catch (error) {
       setSpeechStatus('idle')
       setSpeakingTarget('')
-    },
-    onError: () => {
-      setSpeechStatus('idle')
-      setSpeakingTarget('')
-      showNotice('Speech playback encountered an error.')
-    },
-  })
-
-  if (!result.success) {
-    showNotice(result.message)
+      showNotice(error.message || 'Speech playback failed.')
+    }
   }
-}
 
-function handlePauseSpeech() {
-  pauseSpeech()
-  setSpeechStatus('paused')
-}
 
-function handleResumeSpeech() {
-  resumeSpeech()
-  setSpeechStatus('speaking')
-}
+  function handlePauseSpeech() {
+    pauseSpeech()
+    setSpeechStatus('paused')
+  }
 
-function handleStopSpeech() {
-  stopSpeech()
-  setSpeechStatus('idle')
-  setSpeakingTarget('')
-}
+  function handleResumeSpeech() {
+    resumeSpeech()
+    setSpeechStatus('speaking')
+  }
+
+  function handleStopSpeech() {
+    stopSpeech()
+    setSpeechStatus('idle')
+    setSpeakingTarget('')
+  }
 
   function handleSourceChange(value) {
     setSourceText(value)
@@ -123,179 +142,180 @@ function handleStopSpeech() {
     setNotice('')
   }
 
-async function handleTranslate() {
-  const cleanText = sourceText.trim()
+  async function handleTranslate() {
+    const cleanText = sourceText.trim()
 
-  if (!cleanText) {
-    showNotice('Enter a message before translating.')
-    return
-  }
-
-  if (isTranslating) return
-
-  setIsTranslating(true)
-  setTranslatedText('')
-  showNotice('Checking translation cache...')
-
-  try {
-    // 1. Check browser cache first
-    const cachedData = await getCachedTranslation(
-      cleanText,
-      sourceLanguage,
-      targetLanguage,
-    )
-
-    if (cachedData) {
-      setTranslatedText(cachedData.translation)
-
-      showNotice('Translation retrieved instantly from your cache.')
-
+    if (!cleanText) {
+      showNotice('Enter a message before translating.')
       return
     }
 
-    // 2. Cache miss: request translation from backend
-    showNotice('Translating your message...')
+    if (isTranslating) return
 
-    const response = await fetch(
-      `${API_BASE_URL}/api/translate`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          text: cleanText,
-          sourceLanguage,
-          targetLanguage,
-        }),
-      },
-    )
-
-    const data = await response.json()
-
-    if (!response.ok || !data.success) {
-      throw new Error(
-        data.message || 'Translation failed. Please try again.',
-      )
-    }
-
-    // 3. Display translation
-    setTranslatedText(data.translation)
-
-    // 4. Save successful translation in browser
-    await saveCachedTranslation(
-      cleanText,
-      sourceLanguage,
-      targetLanguage,
-      {
-        translation: data.translation,
-        model: data.model,
-        fallbackUsed: data.fallbackUsed,
-      },
-    )
-
-    if (data.fallbackUsed) {
-      showNotice(
-        `Translation successful using backup model: ${data.model}.`,
-      )
-    } else {
-      showNotice('Translation completed successfully.')
-    }
-
-  } catch (error) {
-    console.error('LEO translation error:', error)
-
-    showNotice(
-      error.message ||
-        'Unable to reach LEO. Check your internet connection and try again.',
-    )
-  } finally {
-    setIsTranslating(false)
-  }
-};
-
-  function handleClear() {
-    setSourceText('')
+    setIsTranslating(true)
     setTranslatedText('')
-    setNotice('')
-  }
-
-  function handleSample() {
-    handleSourceChange(starterText)
-    showNotice('Sample message added.')
-  }
-
-  function handleSwapLanguages() {
-    if (sourceLanguage === 'auto') return
-
-    setSourceLanguage(targetLanguage)
-    setTargetLanguage(sourceLanguage)
-    setSourceText(translatedText || sourceText)
-    setTranslatedText('')
-    setNotice('Languages swapped.')
-  }
-
-  async function handleCopy() {
-    if (!translatedText) {
-      showNotice('There is no translation to copy yet.')
-      return
-    }
+    showNotice('Checking translation cache...')
 
     try {
-      await navigator.clipboard.writeText(translatedText)
-      setIsCopying(true)
-      showNotice('Translation copied to clipboard.')
-      window.setTimeout(() => setIsCopying(false), 1200)
-    } catch {
-      showNotice('Clipboard access failed. Please copy the text manually.')
-    }
-  }
-
-  function handleSavePhrase() {
-    const phrase = sourceText.trim()
-
-    if (!phrase) {
-      showNotice('Enter a phrase before saving it.')
-      return
-    }
-
-    const alreadySaved = savedPhrases.some(
-      (item) =>
-        item.text === phrase &&
-        item.sourceLanguage === sourceLanguage &&
-        item.targetLanguage === targetLanguage,
-    )
-
-    if (alreadySaved) {
-      showNotice('This phrase is already in your saved vocabulary.')
-      return
-    }
-
-    setSavedPhrases((current) => [
-      ...current,
-      {
-        id: `${Date.now()}-${current.length}`,
-        text: phrase,
+      // 1. Check browser cache first
+      const cachedData = await getCachedTranslation(
+        cleanText,
         sourceLanguage,
         targetLanguage,
-      },
-    ])
+      )
 
-    showNotice('Phrase saved to your vocabulary.')
+      if (cachedData) {
+        setTranslatedText(cachedData.translation)
+
+        showNotice('Translation retrieved instantly from your cache.')
+
+        return
+      }
+
+      // 2. Cache miss: request translation from backend
+      showNotice('Translating your message...')
+
+      const response = await fetch(
+        `${API_BASE_URL}/api/translate`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            text: cleanText,
+            sourceLanguage,
+            targetLanguage,
+          }),
+        },
+      )
+
+      const data = await response.json()
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || 'Translation failed. Please try again.',
+        )
+      }
+
+      // 3. Display translation
+      setTranslatedText(data.translation)
+
+      // 4. Save successful translation in browser
+      await saveCachedTranslation(
+        cleanText,
+        sourceLanguage,
+        targetLanguage,
+        {
+          translation: data.translation,
+          model: data.model,
+          fallbackUsed: data.fallbackUsed,
+        },
+      )
+
+      if (data.fallbackUsed) {
+        showNotice(
+          `Translation successful using backup model: ${data.model}.`,
+        )
+      } else {
+        showNotice('Translation completed successfully.')
+      }
+
+    } catch (error) {
+      console.error('LEO translation error:', error)
+
+      showNotice(
+        error.message ||
+        'Unable to reach LEO. Check your internet connection and try again.',
+      )
+    } finally {
+      setIsTranslating(false)
+    }
+
+
+    function handleClear() {
+      setSourceText('')
+      setTranslatedText('')
+      setNotice('')
+    }
+
+    function handleSample() {
+      handleSourceChange(starterText)
+      showNotice('Sample message added.')
+    }
+
+    function handleSwapLanguages() {
+      if (sourceLanguage === 'auto') return
+
+      setSourceLanguage(targetLanguage)
+      setTargetLanguage(sourceLanguage)
+      setSourceText(translatedText || sourceText)
+      setTranslatedText('')
+      setNotice('Languages swapped.')
+    }
+
+    async function handleCopy() {
+      if (!translatedText) {
+        showNotice('There is no translation to copy yet.')
+        return
+      }
+
+      try {
+        await navigator.clipboard.writeText(translatedText)
+        setIsCopying(true)
+        showNotice('Translation copied to clipboard.')
+        window.setTimeout(() => setIsCopying(false), 1200)
+      } catch {
+        showNotice('Clipboard access failed. Please copy the text manually.')
+      }
+    }
+
+    function handleSavePhrase() {
+      const phrase = sourceText.trim()
+
+      if (!phrase) {
+        showNotice('Enter a phrase before saving it.')
+        return
+      }
+
+      const alreadySaved = savedPhrases.some(
+        (item) =>
+          item.text === phrase &&
+          item.sourceLanguage === sourceLanguage &&
+          item.targetLanguage === targetLanguage,
+      )
+
+      if (alreadySaved) {
+        showNotice('This phrase is already in your saved vocabulary.')
+        return
+      }
+
+      setSavedPhrases((current) => [
+        ...current,
+        {
+          id: `${Date.now()}-${current.length}`,
+          text: phrase,
+          sourceLanguage,
+          targetLanguage,
+        },
+      ])
+
+      showNotice('Phrase saved to your vocabulary.')
+    }
+
+    function handleRemovePhrase(id) {
+      setSavedPhrases((current) =>
+        current.filter((phrase) => phrase.id !== id),
+      )
+      showNotice('Phrase removed.')
+    }
+
+    function openPage(page) {
+      setActivePage(page)
+      setNotice('')
+      setSidebarOpen(false)
+    }
   }
-
-  function handleRemovePhrase(id) {
-    setSavedPhrases((current) =>
-      current.filter((phrase) => phrase.id !== id),
-    )
-    showNotice('Phrase removed.')
-  }
-
-  function openPage(page) {
-  setActivePage(page)
-  setNotice('')
-  setSidebarOpen(false)
-}
 
   return (
     <div className={`app-shell theme-${theme}`}>
@@ -303,9 +323,9 @@ async function handleTranslate() {
         <button
           className="brand"
           onClick={() => {
-  openPage('translate')
-  setSidebarOpen(false)
-}}
+            openPage('translate')
+            setSidebarOpen(false)
+          }}
           aria-label="LEO home"
         >
           <span className="brand-mark" aria-hidden="true">
@@ -486,9 +506,9 @@ async function handleTranslate() {
                           }
                           disabled={!sourceText.trim()}
                         >
-                          {speakingTarget === 'source' && speechStatus === 'speaking'
-                            ? 'Playing...'
-                            : '▶ Listen'}
+                          {speakingTarget === 'source' && speechStatus === 'loading'
+                            ? 'Generating...'
+                            : 'Listen'}
                         </button>
 
                         <button className="sample-button" onClick={handleSample}>
@@ -569,10 +589,9 @@ async function handleTranslate() {
                           }
                           disabled={!translatedText}
                         >
-                          {speakingTarget === 'translation' &&
-                            speechStatus === 'speaking'
-                            ? 'Playing...'
-                            : '▶ Listen'}
+                          {speakingTarget === 'translation' && speechStatus === 'loading'
+                            ? 'Generating...'
+                            : 'Listen'}
                         </button>
 
                         <button
@@ -588,7 +607,7 @@ async function handleTranslate() {
                   </article>
                 </div>
 
-                {speechStatus !== 'idle' && (
+                {(speechStatus === 'speaking' || speechStatus === 'paused') && (
                   <div className="translation-actions">
                     {speechStatus === 'speaking' ? (
                       <button
