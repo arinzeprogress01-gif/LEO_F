@@ -27,6 +27,17 @@ const languages = [
   { code: 'pt', name: 'Portuguese', flag: '🇵🇹' },
   { code: 'ig', name: 'Igbo', flag: '🌍' },
   { code: 'yo', name: 'Yoruba', flag: '🌍' },
+  { code: 'ar', name: 'Arabic', flag: '🇸🇦' },
+  { code: 'zh', name: 'Chinese (Simplified)', flag: '🇨🇳' },
+  { code: 'ja', name: 'Japanese', flag: '🇯🇵' },
+  { code: 'ko', name: 'Korean', flag: '🇰🇷' },
+  { code: 'it', name: 'Italian', flag: '🇮🇹' },
+  { code: 'hi', name: 'Hindi', flag: '🇮🇳' },
+]
+
+const sourceLanguages = [
+  { code: 'auto', name: 'Auto Detect', flag: '🌐' },
+  ...languages,
 ]
 
 const starterText =
@@ -373,7 +384,7 @@ async function handleTranslate() {
           <div className="topbar-actions">
             <span className="service-status">
               <span className="status-dot" />
-              DAVID IS HERE
+              SET YOUR MODE!
             </span>
 
             <button
@@ -436,7 +447,7 @@ async function handleTranslate() {
                               setTranslatedText('')
                             }}
                           >
-                            {languages.map((language) => (
+                            {sourceLanguages.map((language) => (
                               <option key={language.code} value={language.code}>
                                 {language.name}
                               </option>
@@ -452,6 +463,7 @@ async function handleTranslate() {
 
                     <textarea
                       className="source-input"
+                      dir={sourceLanguage === 'ar' ? 'rtl' : 'auto'}
                       value={sourceText}
                       maxLength={4000}
                       onChange={(event) =>
@@ -529,6 +541,7 @@ async function handleTranslate() {
 
                     <div
                       className={`output-content ${translatedText ? 'has-output' : ''}`}
+                      dir={targetLanguage === 'ar' ? 'rtl' : 'auto'}
                       aria-live="polite"
                     >
                       {translatedText || (

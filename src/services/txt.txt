@@ -1,0 +1,683 @@
+C:\Users\HomePC\Desktop\NEW_LEO\backend>type server.js
+
+import express from "express";
+import cors from "cors";
+import dotenv from "dotenv";
+import Groq from "groq-sdk";
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 8080;
+
+// ==========================================
+// 1. GROQ CONFIGURATION
+// ==========================================
+
+const groqApiKey = process.env.LEO_GROQ_API_KEY;
+
+if (!groqApiKey) {
+  console.error("Missing LEO_GROQ_API_KEY in .env");
+  process.exit(1);
+}
+
+const groq = new Groq({
+  apiKey: groqApiKey,
+  timeout: 12000,
+  maxRetries: 0,
+});
+
+// Primary model first, backup second.
+const GROQ_MODELS = [
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+];
+
+// ==========================================
+// 2. SUPPORTED LANGUAGES
+// ==========================================
+
+const LANGUAGES = {
+  auto: "automatically detected",
+  en: "English",
+  fr: "French",
+  es: "Spanish",
+  de: "German",
+  pt: "Portuguese",
+  ig: "Igbo",
+  yo: "Yoruba",
+};
+
+// ==========================================
+// 3. EXPRESS MIDDLEWARE
+// ==========================================
+
+app.use(cors());
+app.use(express.json({ limit: "20kb" }));
+
+// ==========================================
+// 4. TRANSLATION CACHE (LRU MECHANISM)
+// ==========================================
+
+const translationCache = new Map();
+
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const MAX_CACHE_ENTRIES = 500;
+
+function getCacheKey(text, sourceLanguage, targetLanguage) {
+  return JSON.stringify([
+    text.trim(),
+    sourceLanguage,
+    targetLanguage,
+  ]);
+}
+
+function getCachedTranslation(key) {
+  const cachedEntry = translationCache.get(key);
+
+  if (!cachedEntry) return null;
+
+  if (Date.now() > cachedEntry.expiresAt) {
+    translationCache.delete(key);
+    return null;
+  }
+
+  // Move recently accessed entry to the end.
+  translationCache.delete(key);
+  translationCache.set(key, cachedEntry);
+
+  return cachedEntry.data;
+}
+
+function saveCachedTranslation(key, data) {
+  if (translationCache.has(key)) {
+    translationCache.delete(key);
+  }
+
+  if (translationCache.size >= MAX_CACHE_ENTRIES) {
+    const oldestKey = translationCache.keys().next().value;
+
+    if (oldestKey !== undefined) {
+      translationCache.delete(oldestKey);
+    }
+  }
+
+  translationCache.set(key, {
+    data,
+    expiresAt: Date.now() + CACHE_TTL_MS,
+  });
+}
+
+// ==========================================
+// 5. BASIC API ROUTES
+// ==========================================
+
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "LEO API is running.",
+    deployment: "groq-translation-v1",
+    primaryProvider: "Groq",
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "LEO backend is Healthy.",
+  });
+});
+
+// ==========================================
+// 6. ERROR HANDLING HELPERS
+// ==========================================
+
+function getErrorStatus(error) {
+  const status = Number(error.status);
+
+  if (status >= 400 && status <= 599) {
+    return status;
+  }
+
+  return 0;
+}
+
+function shouldTryBackup(error) {
+  const status = getErrorStatus(error);
+
+  // Retry with the backup model for temporary
+  // provider, network, timeout, or availability errors.
+  if (status === 0) return true;
+
+  return [408, 429, 500, 502, 503, 504].includes(status);
+}
+
+// ==========================================
+// 7. CORE TRANSLATION ENGINE (GROQ ONLY)
+// ==========================================
+
+async function generateTranslation(prompt) {
+  let lastError;
+
+  for (let index = 0; index < GROQ_MODELS.length; index++) {
+    const model = GROQ_MODELS[index];
+    const startedAt = Date.now();
+
+    try {
+      console.log(`[Groq] Trying model: ${model}`);
+
+      const completion = await groq.chat.completions.create({
+        model,
+        messages: [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+        temperature: 0.2,
+      });
+
+      const translation =
+        completion.choices[0]?.message?.content?.trim();
+
+      if (!translation) {
+        throw new Error("Groq returned an empty translation.");
+      }
+
+      const latencyMs = Date.now() - startedAt;
+      const fallbackUsed = index > 0;
+
+      console.log(
+        `[Groq] ${model} completed in ${latencyMs}ms`
+      );
+
+      return {
+        translation,
+        model: `groq:${model}`,
+        fallbackUsed,
+        latencyMs,
+      };
+
+    } catch (error) {
+      lastError = error;
+
+      const latencyMs = Date.now() - startedAt;
+
+      console.error(
+        `[Groq] ${model} failed after ${latencyMs}ms:`,
+        error.message
+      );
+
+      const hasBackup = index < GROQ_MODELS.length - 1;
+
+      if (!hasBackup || !shouldTryBackup(error)) {
+        throw error;
+      }
+
+      console.warn("[Groq] Switching to backup model...");
+    }
+  }
+
+  throw lastError;
+}
+
+// ==========================================
+// 8. TRANSLATION ENDPOINT
+// ==========================================
+
+app.post("/api/translate", async (req, res) => {
+  const requestStartedAt = Date.now();
+
+  try {
+    const {
+      text,
+      sourceLanguage = "auto",
+      targetLanguage,
+    } = req.body;
+
+    // Input validation.
+    if (
+      typeof text !== "string" ||
+      !text.trim() ||
+      text.length > 4000 ||
+      typeof targetLanguage !== "string" ||
+      !LANGUAGES[targetLanguage] ||
+      typeof sourceLanguage !== "string" ||
+      !LANGUAGES[sourceLanguage]
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Provide valid text, source language, and target language. Max 4,000 characters.",
+      });
+    }
+
+    const cleanText = text.trim();
+
+    // No AI request needed when languages are identical.
+    if (
+      sourceLanguage !== "auto" &&
+      sourceLanguage === targetLanguage
+    ) {
+      return res.json({
+        success: true,
+        translation: cleanText,
+        sourceLanguage,
+        targetLanguage,
+        model: "none",
+        fallbackUsed: false,
+        cacheStatus: "BYPASS",
+        latencyMs: 0,
+      });
+    }
+
+    // Check translation cache.
+    const cacheKey = getCacheKey(
+      cleanText,
+      sourceLanguage,
+      targetLanguage
+    );
+
+    const cachedTranslation = getCachedTranslation(cacheKey);
+
+    if (cachedTranslation) {
+      const requestTime = Date.now() - requestStartedAt;
+
+      console.log(
+        `[Cache] Translation served in ${requestTime}ms`
+      );
+
+      return res.json({
+        success: true,
+        translation: cachedTranslation.translation,
+        sourceLanguage,
+        targetLanguage,
+        model: cachedTranslation.model,
+        fallbackUsed: cachedTranslation.fallbackUsed,
+        cacheStatus: "HIT",
+        latencyMs: requestTime,
+      });
+    }
+
+    // Build translation prompt.
+    const prompt = `You are LEO, a careful multilingual translation assistant.
+
+Translate the user's text into ${LANGUAGES[targetLanguage]}.
+
+${sourceLanguage === "auto"
+        ? "Detect the source language automatically."
+        : `The source language is ${LANGUAGES[sourceLanguage]}.`
+      }
+
+Requirements:
+- Preserve the original meaning.
+- Preserve tone and level of formality.
+- Preserve names, numbers, and important details.
+- Use natural, grammatically correct language.
+- Preserve inline formatting and paragraph structure.
+- Do not invent information.
+- Return ONLY the translation.
+- Do not include explanations or introductory notes.
+
+Text to translate:
+${cleanText}`;
+
+    // Generate translation using Groq.
+    const result = await generateTranslation(prompt);
+
+    // Cache successful translation.
+    saveCachedTranslation(cacheKey, result);
+
+    const requestTime = Date.now() - requestStartedAt;
+
+    console.log(
+      `[Translation] Completed in ${requestTime}ms using ${result.model}`
+    );
+
+    return res.json({
+      success: true,
+      translation: result.translation,
+      sourceLanguage,
+      targetLanguage,
+      model: result.model,
+      fallbackUsed: result.fallbackUsed,
+      cacheStatus: "MISS",
+      latencyMs: result.latencyMs,
+    });
+
+  } catch (error) {
+    console.error(
+      "[Translation Endpoint Exception]:",
+      error.message
+    );
+
+    return res.status(502).json({
+      success: false,
+      message: "LEO could not complete the translation. Please try again.",
+    });
+  }
+});
+
+// ==========================================
+// 9. START SERVER
+// ==========================================
+
+app.listen(PORT, () => {
+  console.log(`LEO Groq API running on port ${PORT}`);
+});
+
+C:\Users\HomePC\Desktop\NEW_LEO\backend>type package.json
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "@google/genai": "^2.31.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "groq-sdk": "^1.6.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}
+
+C:\Users\HomePC\Desktop\NEW_LEO\backend>............................... this is speech.servers.js in the frontene/src/services/audio: 
+const languageLocales = {
+    en: 'en-US',
+    fr: 'fr-FR',
+    es: 'es-ES',
+    de: 'de-DE',
+    pt: 'pt-PT',
+    ig: 'ig-NG',
+    yo: 'yo-NG',
+}
+
+export function isSpeechSupported() {
+    return (
+        typeof window !== 'undefined' &&
+        'speechSynthesis' in window &&
+        'SpeechSynthesisUtterance' in window
+    )
+}
+
+export function getAvailableVoices(languageCode) {
+    if (!isSpeechSupported()) return []
+
+    return window.speechSynthesis
+        .getVoices()
+        .filter((voice) =>
+            voice.lang.toLowerCase().startsWith(languageCode.toLowerCase()),
+        )
+}
+
+export function speakText(
+    text,
+    languageCode = 'en',
+    callbacks = {},
+) {
+    if (!isSpeechSupported()) {
+        return {
+            success: false,
+            message: 'Speech playback is not supported in this browser.',
+        }
+    }
+
+    const cleanText = text?.trim()
+
+    if (!cleanText) {
+        return { success: false, message: 'There is no text to read.' }
+    }
+
+    const locale = languageLocales[languageCode]
+
+    if (!locale) {
+        return {
+            success: false,
+            message: 'This language is not configured for speech playback.',
+        }
+    }
+
+    window.speechSynthesis.cancel()
+
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    const voices = getAvailableVoices(languageCode)
+
+    utterance.lang = locale
+
+    if (voices.length > 0) {
+        utterance.voice = voices[0]
+    }
+
+    utterance.rate = 0.95
+    utterance.pitch = 1
+
+    utterance.onstart = () => callbacks.onStart?.()
+    utterance.onend = () => callbacks.onEnd?.()
+    utterance.onerror = (event) => callbacks.onError?.(event)
+
+    window.speechSynthesis.speak(utterance)
+
+    return { success: true }
+}
+
+export function pauseSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.pause()
+    }
+}
+
+export function resumeSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.resume()
+    }
+}
+
+export function stopSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.cancel()
+    }
+}
+
+const languageLocales = {
+    en: 'en-US',
+    fr: 'fr-FR',
+    es: 'es-ES',
+    de: 'de-DE',
+    pt: 'pt-PT',
+    ig: 'ig-NG',
+    yo: 'yo-NG',
+}
+
+export function isSpeechSupported() {
+    return (
+        typeof window !== 'undefined' &&
+        'speechSynthesis' in window &&
+        'SpeechSynthesisUtterance' in window
+    )
+}
+
+export function getAvailableVoices(languageCode) {
+    if (!isSpeechSupported()) return []
+
+    return window.speechSynthesis
+        .getVoices()
+        .filter((voice) =>
+            voice.lang.toLowerCase().startsWith(languageCode.toLowerCase()),
+        )
+}
+
+export function speakText(
+    text,
+    languageCode = 'en',
+    callbacks = {},
+) {
+    if (!isSpeechSupported()) {
+        return {
+            success: false,
+            message: 'Speech playback is not supported in this browser.',
+        }
+    }
+
+    const cleanText = text?.trim()
+
+    if (!cleanText) {
+        return { success: false, message: 'There is no text to read.' }
+    }
+
+    const locale = languageLocales[languageCode]
+
+    if (!locale) {
+        return {
+            success: false,
+            message: 'This language is not configured for speech playback.',
+        }
+    }
+
+    window.speechSynthesis.cancel()
+
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    const voices = getAvailableVoices(languageCode)
+
+    utterance.lang = locale
+
+    if (voices.length > 0) {
+        utterance.voice = voices[0]
+    }
+
+    utterance.rate = 0.95
+    utterance.pitch = 1
+
+    utterance.onstart = () => callbacks.onStart?.()
+    utterance.onend = () => callbacks.onEnd?.()
+    utterance.onerror = (event) => callbacks.onError?.(event)
+
+    window.speechSynthesis.speak(utterance)
+
+    return { success: true }
+}
+
+export function pauseSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.pause()
+    }
+}
+
+export function resumeSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.resume()
+    }
+}
+
+export function stopSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.cancel()
+    }
+}
+
+const languageLocales = {
+    en: 'en-US',
+    fr: 'fr-FR',
+    es: 'es-ES',
+    de: 'de-DE',
+    pt: 'pt-PT',
+    ig: 'ig-NG',
+    yo: 'yo-NG',
+}
+
+export function isSpeechSupported() {
+    return (
+        typeof window !== 'undefined' &&
+        'speechSynthesis' in window &&
+        'SpeechSynthesisUtterance' in window
+    )
+}
+
+export function getAvailableVoices(languageCode) {
+    if (!isSpeechSupported()) return []
+
+    return window.speechSynthesis
+        .getVoices()
+        .filter((voice) =>
+            voice.lang.toLowerCase().startsWith(languageCode.toLowerCase()),
+        )
+}
+
+export function speakText(
+    text,
+    languageCode = 'en',
+    callbacks = {},
+) {
+    if (!isSpeechSupported()) {
+        return {
+            success: false,
+            message: 'Speech playback is not supported in this browser.',
+        }
+    }
+
+    const cleanText = text?.trim()
+
+    if (!cleanText) {
+        return { success: false, message: 'There is no text to read.' }
+    }
+
+    const locale = languageLocales[languageCode]
+
+    if (!locale) {
+        return {
+            success: false,
+            message: 'This language is not configured for speech playback.',
+        }
+    }
+
+    window.speechSynthesis.cancel()
+
+    const utterance = new SpeechSynthesisUtterance(cleanText)
+    const voices = getAvailableVoices(languageCode)
+
+    utterance.lang = locale
+
+    if (voices.length > 0) {
+        utterance.voice = voices[0]
+    }
+
+    utterance.rate = 0.95
+    utterance.pitch = 1
+
+    utterance.onstart = () => callbacks.onStart?.()
+    utterance.onend = () => callbacks.onEnd?.()
+    utterance.onerror = (event) => callbacks.onError?.(event)
+
+    window.speechSynthesis.speak(utterance)
+
+    return { success: true }
+}
+
+export function pauseSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.pause()
+    }
+}
+
+export function resumeSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.resume()
+    }
+}
+
+export function stopSpeech() {
+    if (isSpeechSupported()) {
+        window.speechSynthesis.cancel()
+    }
+}

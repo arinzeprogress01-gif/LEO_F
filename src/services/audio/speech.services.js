@@ -1,4 +1,3 @@
-
 const languageLocales = {
     en: 'en-US',
     fr: 'fr-FR',
@@ -7,6 +6,16 @@ const languageLocales = {
     pt: 'pt-PT',
     ig: 'ig-NG',
     yo: 'yo-NG',
+    ar: 'ar-SA',
+    zh: 'zh-CN',
+    ja: 'ja-JP',
+    ko: 'ko-KR',
+    it: 'it-IT',
+    hi: 'hi-IN',
+}
+
+export function getSpeechLocale(languageCode) {
+    return languageLocales[languageCode] || null
 }
 
 export function isSpeechSupported() {
@@ -20,18 +29,44 @@ export function isSpeechSupported() {
 export function getAvailableVoices(languageCode) {
     if (!isSpeechSupported()) return []
 
-    return window.speechSynthesis
-        .getVoices()
-        .filter((voice) =>
-            voice.lang.toLowerCase().startsWith(languageCode.toLowerCase()),
-        )
+    const locale = getSpeechLocale(languageCode)
+
+    if (!locale) return []
+
+    const voices = window.speechSynthesis.getVoices()
+
+    return voices.filter((voice) =>
+        voice.lang.toLowerCase().replace('_', '-') 
+            .startsWith(locale.toLowerCase().split('-')[0])
+    )
 }
 
-export function speakText(
-    text,
-    languageCode = 'en',
-    callbacks = {},
-) {
+function getBestVoice(languageCode) {
+    if (!isSpeechSupported()) return null
+
+    const locale = getSpeechLocale(languageCode)
+
+    if (!locale) return null
+
+    const voices = window.speechSynthesis.getVoices()
+
+    // Prefer an exact locale match.
+    const exactMatch = voices.find(
+        (voice) => voice.lang.toLowerCase() === locale.toLowerCase()
+    )
+
+    if (exactMatch) return exactMatch
+
+    // Otherwise use a voice matching the language.
+    const languageMatch = voices.find(
+        (voice) =>
+            voice.lang.toLowerCase().split('-')[0] === languageCode.toLowerCase()
+    )
+
+    return languageMatch || null
+}
+
+export function speakText(text, languageCode = 'en', callbacks = {}) {
     if (!isSpeechSupported()) {
         return {
             success: false,
@@ -42,10 +77,13 @@ export function speakText(
     const cleanText = text?.trim()
 
     if (!cleanText) {
-        return { success: false, message: 'There is no text to read.' }
+        return {
+            success: false,
+            message: 'There is no text to read.',
+        }
     }
 
-    const locale = languageLocales[languageCode]
+    const locale = getSpeechLocale(languageCode)
 
     if (!locale) {
         return {
@@ -57,16 +95,16 @@ export function speakText(
     window.speechSynthesis.cancel()
 
     const utterance = new SpeechSynthesisUtterance(cleanText)
-    const voices = getAvailableVoices(languageCode)
 
     utterance.lang = locale
-
-    if (voices.length > 0) {
-        utterance.voice = voices[0]
-    }
-
     utterance.rate = 0.95
     utterance.pitch = 1
+
+    const voice = getBestVoice(languageCode)
+
+    if (voice) {
+        utterance.voice = voice
+    }
 
     utterance.onstart = () => callbacks.onStart?.()
     utterance.onend = () => callbacks.onEnd?.()
@@ -74,7 +112,11 @@ export function speakText(
 
     window.speechSynthesis.speak(utterance)
 
-    return { success: true }
+    return {
+        success: true,
+        voiceAvailable: Boolean(voice),
+        locale,
+    }
 }
 
 export function pauseSpeech() {
