@@ -228,95 +228,93 @@ function App() {
         error.message ||
         'Unable to reach LEO. Check your internet connection and try again.',
       )
-    } finally {
+      } finally {
       setIsTranslating(false)
-    }
-
-
-    function handleClear() {
-      setSourceText('')
-      setTranslatedText('')
-      setNotice('')
-    }
-
-    function handleSample() {
-      handleSourceChange(starterText)
-      showNotice('Sample message added.')
-    }
-
-    function handleSwapLanguages() {
-      if (sourceLanguage === 'auto') return
-
-      setSourceLanguage(targetLanguage)
-      setTargetLanguage(sourceLanguage)
-      setSourceText(translatedText || sourceText)
-      setTranslatedText('')
-      setNotice('Languages swapped.')
-    }
-
-    async function handleCopy() {
-      if (!translatedText) {
-        showNotice('There is no translation to copy yet.')
-        return
-      }
-
-      try {
-        await navigator.clipboard.writeText(translatedText)
-        setIsCopying(true)
-        showNotice('Translation copied to clipboard.')
-        window.setTimeout(() => setIsCopying(false), 1200)
-      } catch {
-        showNotice('Clipboard access failed. Please copy the text manually.')
-      }
-    }
-
-    function handleSavePhrase() {
-      const phrase = sourceText.trim()
-
-      if (!phrase) {
-        showNotice('Enter a phrase before saving it.')
-        return
-      }
-
-      const alreadySaved = savedPhrases.some(
-        (item) =>
-          item.text === phrase &&
-          item.sourceLanguage === sourceLanguage &&
-          item.targetLanguage === targetLanguage,
-      )
-
-      if (alreadySaved) {
-        showNotice('This phrase is already in your saved vocabulary.')
-        return
-      }
-
-      setSavedPhrases((current) => [
-        ...current,
-        {
-          id: `${Date.now()}-${current.length}`,
-          text: phrase,
-          sourceLanguage,
-          targetLanguage,
-        },
-      ])
-
-      showNotice('Phrase saved to your vocabulary.')
-    }
-
-    function handleRemovePhrase(id) {
-      setSavedPhrases((current) =>
-        current.filter((phrase) => phrase.id !== id),
-      )
-      showNotice('Phrase removed.')
-    }
-
-    function openPage(page) {
-      setActivePage(page)
-      setNotice('')
-      setSidebarOpen(false)
     }
   }
 
+  function handleClear() {
+    setSourceText('')
+    setTranslatedText('')
+    setNotice('')
+  }
+
+  function handleSample() {
+    handleSourceChange(starterText)
+    showNotice('Sample message added.')
+  }
+
+  function handleSwapLanguages() {
+    if (sourceLanguage === 'auto') return
+
+    setSourceLanguage(targetLanguage)
+    setTargetLanguage(sourceLanguage)
+    setSourceText(translatedText || sourceText)
+    setTranslatedText('')
+    setNotice('Languages swapped.')
+  }
+
+  async function handleCopy() {
+    if (!translatedText) {
+      showNotice('There is no translation to copy yet.')
+      return
+    }
+
+    try {
+      await navigator.clipboard.writeText(translatedText)
+      setIsCopying(true)
+      showNotice('Translation copied to clipboard.')
+      window.setTimeout(() => setIsCopying(false), 1200)
+    } catch {
+      showNotice('Clipboard access failed. Please copy the text manually.')
+    }
+  }
+
+  function handleSavePhrase() {
+    const phrase = sourceText.trim()
+
+    if (!phrase) {
+      showNotice('Enter a phrase before saving it.')
+      return
+    }
+
+    const alreadySaved = savedPhrases.some(
+      (item) =>
+        item.text === phrase &&
+        item.sourceLanguage === sourceLanguage &&
+        item.targetLanguage === targetLanguage,
+    )
+
+    if (alreadySaved) {
+      showNotice('This phrase is already in your saved vocabulary.')
+      return
+    }
+
+    setSavedPhrases((current) => [
+      ...current,
+      {
+        id: `${Date.now()}-${current.length}`,
+        text: phrase,
+        sourceLanguage,
+        targetLanguage,
+      },
+    ])
+
+    showNotice('Phrase saved to your vocabulary.')
+  }
+
+  function handleRemovePhrase(id) {
+    setSavedPhrases((current) =>
+      current.filter((phrase) => phrase.id !== id),
+    )
+    showNotice('Phrase removed.')
+  }
+
+  function openPage(page) {
+    setActivePage(page)
+    setNotice('')
+    setSidebarOpen(false)
+}
   return (
     <div className={`app-shell theme-${theme}`}>
       <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
