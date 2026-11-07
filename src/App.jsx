@@ -20,6 +20,11 @@ import {
   stopSpeech,
 } from './services/audio/speech.services'
 
+import {
+  saveTranslationHistory,
+  getTranslationHistory,
+} from './services/translationHistory.service'
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080'
 
@@ -96,10 +101,42 @@ function App() {
   localStorage.setItem('leo-theme', theme)
 }, [theme])
 
+  useEffect(() => {
+    if (!hasEntered) return
+
+    let isMounted = true
+
+    async function loadHistory() {
+      setIsLoadingHistory(true)
+
+      try {
+        const history = await getTranslationHistory()
+
+        if (isMounted) {
+          setTranslationHistory(history)
+        }
+      } catch (error) {
+        console.error('LEO history retrieval error:', error)
+      } finally {
+        if (isMounted) {
+          setIsLoadingHistory(false)
+        }
+      }
+    }
+
+    loadHistory()
+
+    return () => {
+      isMounted = false
+    }
+  }, [hasEntered])
+
   
   const [activePage, setActivePage] = useState('translate')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [savedPhrases, setSavedPhrases] = useState([])
+  const [translationHistory, setTranslationHistory] = useState([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [notice, setNotice] = useState('')
   const [isCopying, setIsCopying] = useState(false)
   const [isTranslating, setIsTranslating] = useState(false)
@@ -115,6 +152,32 @@ function App() {
 
   function showNotice(message) {
     setNotice(message)
+  }
+
+  async function persistTranslationHistory(
+    source,
+    translation,
+    fromLanguage,
+    toLanguage,
+    detectedLanguage = null,
+  ) {
+    try {
+      const saved = await saveTranslationHistory({
+        sourceText: source,
+        translatedText: translation,
+        sourceLanguage: fromLanguage,
+        targetLanguage: toLanguage,
+        detectedSourceLanguage: detectedLanguage,
+      })
+
+      setTranslationHistory((current) => [
+        saved,
+        ...current,
+      ])
+    } catch (error) {
+      // History failure must never interrupt translation.
+      console.error('LEO history save error:', error)
+    }
   }
 
 
@@ -216,6 +279,13 @@ function App() {
       if (cachedData) {
         setTranslatedText(cachedData.translation)
 
+        void persistTranslationHistory(
+          cleanText,
+          cachedData.translation,
+          sourceLanguage,
+          targetLanguage,
+        )
+
         showNotice('Translation retrieved instantly from your cache.')
 
         return
@@ -249,6 +319,15 @@ function App() {
 
       // 3. Display translation
       setTranslatedText(data.translation)
+
+      // Save successful translation to MongoDB history.
+      void persistTranslationHistory(
+        cleanText,
+        data.translation,
+        sourceLanguage,
+        targetLanguage,
+        data.detectedSourceLanguage || null,
+      )
 
       // 4. Save successful translation in browser
       await saveCachedTranslation(
@@ -364,6 +443,18 @@ function App() {
     setNotice('')
     setSidebarOpen(false)
 }
+
+function handleOpenHistory(item) {
+  setSourceText(item.sourceText)
+  setTranslatedText(item.translatedText)
+  setSourceLanguage(item.sourceLanguage)
+  setTargetLanguage(item.targetLanguage)
+
+  setActivePage('translate')
+  setNotice('Previous translation restored.')
+  setSidebarOpen(false)
+  }
+  
   async function handleContinueAsGuest() {
     if (isStartingGuest) return
 
@@ -448,6 +539,15 @@ function App() {
             <span>My vocabulary</span>
             <span className="nav-count">{savedPhrases.length}</span>
           </button>
+          <button
+            className={`nav-item ${activePage === 'history' ? 'active' : ''}`}
+            onClick={() => openPage('history')}
+          >
+            <span className="nav-icon" aria-hidden="true">◷</span>
+            <span>Translation history</span>
+            <span className="nav-count">{translationHistory.length}</span>
+          </button>
+
         </nav>
 
         <div className="sidebar-spacer" />
@@ -491,7 +591,11 @@ function App() {
             <span>Workspace</span>
             <span className="breadcrumb-separator">/</span>
             <strong>
-              {activePage === 'translate' ? 'Translate' : 'My vocabulary'}
+              {activePage === 'translate'
+                ? 'Translate'
+                : activePage === 'history'
+                  ? 'Translation history'
+                  : 'My vocabulary'}
             </strong>
           </div>
 
@@ -799,6 +903,112 @@ function App() {
                 </div>
               </section>
             </>
+          ) : activePage === 'history' ? (
+            <section className="vocabulary-page">
+              <div className="eyebrow">
+                <span className="eyebrow-sparkle">✦</span>
+                YOUR PREVIOUS TRANSLATIONS
+              </div>
+
+              <h1>Translation history<span>.</span></h1>
+
+              <p className="welcome-description">
+                Revisit messages you have translated in your LEO workspace.
+              </p>
+
+              <div className="vocabulary-heading">
+                <div>
+                  <h2>Recent translations</h2>
+                  <p>{translationHistory.length} saved translations</p>
+                </div>
+
+                <button
+                  className="secondary-button"
+                  onClick={() => openPage('translate')}
+                >
+                  + New translation
+                </button>
+              </div>
+
+              {isLoadingHistory ? (
+                <div className="vocabulary-empty">
+                  <p>Loading your translation history...</p>
+                </div>
+              ) : translationHistory.length === 0 ? (
+                <div className="vocabulary-empty">
+                  <span className="empty-output-icon">◷</span>
+                  <h3>No translation history yet</h3>
+                  <p>
+                    Your successful translations will appear here
+                    so you can revisit them whenever you need.
+                  </p>
+
+                  <button
+                    className="primary-button"
+                    onClick={() => openPage('translate')}
+                  >
+                    Start translating →
+                  </button>
+                </div>
+              ) : (
+                <div className="saved-list">
+                  {translationHistory.map((item) => {
+                    const from = sourceLanguages.find(
+                      (language) => language.code === item.sourceLanguage
+                    )
+
+                    const to = languages.find(
+                      (language) => language.code === item.targetLanguage
+                    )
+
+                    return (
+                      <article
+                        className="saved-phrase"
+                        key={item._id}
+                      >
+                        <div className="saved-phrase-main">
+                          <p>{item.sourceText}</p>
+
+                          <span>
+                            {from?.name || item.sourceLanguage}
+                            {' → '}
+                            {to?.name || item.targetLanguage}
+                          </span>
+
+                          <p>{item.translatedText}</p>
+
+                          <span>
+                            {item.createdAt
+                              ? new Date(item.createdAt).toLocaleString()
+                              : 'Previously translated'}
+                          </span>
+                        </div>
+
+                        <button
+                          className="remove-button text-button"
+                          onClick={() => handleOpenHistory(item)}
+                        >
+                          Open
+                        </button>
+                      </article>
+                    )
+                  })}
+                </div>
+              )}
+
+              {notice && (
+                <div className="notice" role="status">
+                  <span aria-hidden="true">ⓘ</span>
+                  <p>{notice}</p>
+                  <button
+                    onClick={() => setNotice('')}
+                    aria-label="Dismiss message"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </section>
           ) : (
             <section className="vocabulary-page">
               <div className="eyebrow">
