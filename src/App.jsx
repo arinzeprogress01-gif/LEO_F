@@ -1,5 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import './App.css'
+
+import Welcome from './components/Welcome.jsx'
+
+import {
+  createGuestSession,
+  restoreGuestSession,
+} from './services/identity/identity.service'
 
 import {
   getCachedTranslation,
@@ -43,11 +50,53 @@ const starterText =
   'Thank you for your message. I look forward to speaking with you.'
 
 function App() {
+
+  const [hasEntered, setHasEntered] = useState(false)
+  const [isCheckingSession, setIsCheckingSession] = useState(true)
+  const [isStartingGuest, setIsStartingGuest] = useState(false)
+  const [entryError, setEntryError] = useState('')
+  
+  useEffect(() => {
+  let isMounted = true
+
+  async function checkExistingSession() {
+    try {
+      const isValid = await restoreGuestSession()
+
+      if (isMounted && isValid) {
+        setHasEntered(true)
+      }
+    } finally {
+      if (isMounted) {
+        setIsCheckingSession(false)
+      }
+    }
+  }
+
+  checkExistingSession()
+
+  return () => {
+    isMounted = false
+  }
+}, [])
+
+  
   const [sourceLanguage, setSourceLanguage] = useState('en')
   const [targetLanguage, setTargetLanguage] = useState('fr')
   const [sourceText, setSourceText] = useState('')
   const [translatedText, setTranslatedText] = useState('')
-  const [theme, setTheme] = useState('light')
+
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem('leo-theme')
+
+    return savedTheme === 'dark' ? 'dark' : 'light'
+  })
+
+  useEffect(() => {
+  localStorage.setItem('leo-theme', theme)
+}, [theme])
+
+  
   const [activePage, setActivePage] = useState('translate')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [savedPhrases, setSavedPhrases] = useState([])
@@ -315,6 +364,42 @@ function App() {
     setNotice('')
     setSidebarOpen(false)
 }
+  async function handleContinueAsGuest() {
+    if (isStartingGuest) return
+
+    setIsStartingGuest(true)
+    setEntryError('')
+
+    try {
+      await createGuestSession()
+      setHasEntered(true)
+    } catch (error) {
+      console.error('LEO guest entry error:', error)
+
+      setEntryError(
+        error.message ||
+        'Unable to enter LEO. Please check your connection and try again.'
+      )
+    } finally {
+      setIsStartingGuest(false)
+    }
+  }
+
+  function handleSignIn() {
+    setEntryError('Account sign-in is coming soon. You can use LEO as a guest right now.')
+  }
+
+  if (!hasEntered) {
+    return (
+      <Welcome
+        onContinueAsGuest={handleContinueAsGuest}
+        onSignIn={handleSignIn}
+        isStartingGuest={isStartingGuest}
+        isCheckingSession={isCheckingSession}
+        error={entryError}
+      />
+    )
+  }
   return (
     <div className={`app-shell theme-${theme}`}>
       <aside className={`sidebar ${sidebarOpen ? 'sidebar-open' : ''}`}>
