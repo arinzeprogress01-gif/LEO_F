@@ -389,6 +389,17 @@ function App() {
     setEntryError('Account sign-in is coming soon. You can use LEO as a guest right now.')
   }
 
+  // Wait until we know whether a guest session already exists.
+  if (isCheckingSession) {
+    return (
+      <div className="leo-session-loading">
+        <div className="leo-loading-spinner" />
+        <span>Preparing your LEO workspace...</span>
+      </div>
+    )
+  }
+
+  // Only show the welcome page when there is no valid session.
   if (!hasEntered) {
     return (
       <Welcome
