@@ -18,6 +18,7 @@ import {
   pauseSpeech,
   resumeSpeech,
   stopSpeech,
+  downloadSpeechAudio,
 } from './services/audio/speech.services'
 
 import {
@@ -139,6 +140,7 @@ function App() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const [notice, setNotice] = useState('')
   const [isCopying, setIsCopying] = useState(false)
+  const [isDownloadingAudio, setIsDownloadingAudio] = useState(false)
   const [isTranslating, setIsTranslating] = useState(false)
   const [speechStatus, setSpeechStatus] = useState('idle')
   const [speakingTarget, setSpeakingTarget] = useState('')
@@ -383,6 +385,39 @@ function App() {
   }
 
   async function handleCopy() {
+
+    async function handleDownloadAudio() {
+      if (!translatedText) {
+        showNotice('There is no translation available to download.')
+        return
+      }
+
+      if (isDownloadingAudio) return
+
+      setIsDownloadingAudio(true)
+      showNotice('Preparing your translated audio...')
+
+      try {
+        const result = await downloadSpeechAudio(
+          translatedText,
+          targetLanguage,
+        )
+
+        if (!result.success) {
+          throw new Error(result.message || 'Audio download failed.')
+        }
+
+        showNotice('Your translated audio has been downloaded successfully.')
+      } catch (error) {
+        console.error('LEO audio download error:', error)
+
+        showNotice(
+          error.message || 'Unable to download audio. Please try again.',
+        )
+      } finally {
+        setIsDownloadingAudio(false)
+      }
+    }
     if (!translatedText) {
       showNotice('There is no translation to copy yet.')
       return
@@ -790,6 +825,15 @@ function handleOpenHistory(item) {
                           {speakingTarget === 'translation' && speechStatus === 'loading'
                             ? 'Generating...'
                             : 'Listen'}
+                        </button>
+
+                        <button
+                          className="copy-button"
+                          onClick={handleDownloadAudio}
+                          disabled={!translatedText || isDownloadingAudio}
+                        >
+                          <span aria-hidden="true">↓</span>
+                          {isDownloadingAudio ? 'Preparing...' : 'Download'}
                         </button>
 
                         <button
