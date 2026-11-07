@@ -385,53 +385,53 @@ function App() {
   }
 
   async function handleCopy() {
-
-    async function handleDownloadAudio() {
-      if (!translatedText) {
-        showNotice('There is no translation available to download.')
-        return
-      }
-
-      if (isDownloadingAudio) return
-
-      setIsDownloadingAudio(true)
-      showNotice('Preparing your translated audio...')
-
-      try {
-        const result = await downloadSpeechAudio(
-          translatedText,
-          targetLanguage,
-        )
-
-        if (!result.success) {
-          throw new Error(result.message || 'Audio download failed.')
-        }
-
-        showNotice('Your translated audio has been downloaded successfully.')
-      } catch (error) {
-        console.error('LEO audio download error:', error)
-
-        showNotice(
-          error.message || 'Unable to download audio. Please try again.',
-        )
-      } finally {
-        setIsDownloadingAudio(false)
-      }
-    }
-    if (!translatedText) {
-      showNotice('There is no translation to copy yet.')
-      return
-    }
-
-    try {
-      await navigator.clipboard.writeText(translatedText)
-      setIsCopying(true)
-      showNotice('Translation copied to clipboard.')
-      window.setTimeout(() => setIsCopying(false), 1200)
-    } catch {
-      showNotice('Clipboard access failed. Please copy the text manually.')
-    }
+  if (!translatedText) {
+    showNotice('There is no translation to copy yet.')
+    return
   }
+
+  try {
+    await navigator.clipboard.writeText(translatedText)
+    setIsCopying(true)
+    showNotice('Translation copied to clipboard.')
+    window.setTimeout(() => setIsCopying(false), 1200)
+  } catch {
+    showNotice('Clipboard access failed. Please copy the text manually.')
+  }
+}
+
+async function handleDownloadAudio() {
+  if (!translatedText) {
+    showNotice('There is no translation available to download.')
+    return
+  }
+
+  if (isDownloadingAudio) return
+
+  setIsDownloadingAudio(true)
+  showNotice('Preparing your translated audio...')
+
+  try {
+    const result = await downloadSpeechAudio(
+      translatedText,
+      targetLanguage,
+    )
+
+    if (!result.success) {
+      throw new Error(result.message || 'Audio download failed.')
+    }
+
+    showNotice('Your translated audio has been downloaded successfully.')
+  } catch (error) {
+    console.error('LEO audio download error:', error)
+
+    showNotice(
+      error.message || 'Unable to download audio. Please try again.',
+    )
+  } finally {
+    setIsDownloadingAudio(false)
+  }
+}
 
   function handleSavePhrase() {
     const phrase = sourceText.trim()
